@@ -254,6 +254,25 @@ def methodApiPrototype(m):
 
 AmqpMethod.apiPrototype = methodApiPrototype
 
+def methodRequestApiPrototype(m):
+    fn = m.fullName()
+    info = apiMethodInfo.get(fn, [])
+
+    args = []
+    for f in m.arguments:
+        n = c_ize(f.name)
+        if n in apiMethodsSuppressArgs or n in info:
+            continue
+
+        args.append(", ")
+        args.append(typeFor(m.klass.spec, f).ctype)
+        args.append(" ")
+        args.append(n)
+
+    return "int %s_request(amqp_connection_state_t state, amqp_channel_t channel%s)" % (fn, ''.join(args))
+	
+AmqpMethod.apiRequestPrototype = methodRequestApiPrototype
+
 def cConstantName(s):
     return 'AMQP_' + '_'.join(re.split('[- ]', s.upper()))
 
@@ -534,6 +553,39 @@ int amqp_encode_properties(uint16_t class_id,
 }
 """ % (m.defName(), reply)
 
+    for m in methods:
+        if not m.isSynchronous:
+            continue
+
+        info = apiMethodInfo.get(m.fullName(), [])
+        if info is False:
+            continue
+
+        print
+        print m.apiRequestPrototype()
+        print "{"
+        print "  %s req;" % (m.structName(),)
+
+        for f in m.arguments:
+            n = c_ize(f.name)
+
+            val = apiMethodsSuppressArgs.get(n)
+            if val is None and n in info:
+                val = f.defaultvalue
+
+            if val is None:
+                val = n
+            else:
+                val = typeFor(spec, f).literal(val)
+
+
+            print "  req.%s = %s;" % (n, val)
+
+        print """
+  return amqp_send_method(state, channel, %s, &req);
+}
+""" % m.defName()
+
 def genHrl(spec):
     def fieldDeclList(fields):
         if fields:
@@ -626,6 +678,12 @@ extern int amqp_encode_properties(uint16_t class_id,
     for m in methods:
         if m.isSynchronous and apiMethodInfo.get(m.fullName()) is not False:
             print "RABBITMQ_EXPORT %s;" % (m.apiPrototype(),)
+
+    print
+    
+    for m in methods:
+        if m.isSynchronous and apiMethodInfo.get(m.fullName()) is not False:	    
+            print "RABBITMQ_EXPORT %s;" % (m.apiRequestPrototype(),)
 
     print """
 #ifdef __cplusplus

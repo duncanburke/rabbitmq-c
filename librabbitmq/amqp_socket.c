@@ -203,6 +203,83 @@ int amqp_simple_wait_frame(amqp_connection_state_t state,
   }
 }
 
+int amqp_recv_frames(amqp_connection_state_t state)
+{
+	while (1) {
+		int res;
+		amqp_frame_t *frame = NULL;
+		
+		while (amqp_data_in_buffer(state)) {
+			amqp_bytes_t buffer;
+			
+			buffer.len = state->sock_inbound_limit - state->sock_inbound_offset;
+			buffer.bytes = ((char *) state->sock_inbound_buffer.bytes) + state->sock_inbound_offset;
+
+			if (frame == NULL){
+				frame = amqp_pool_alloc(&state->decoding_pool, sizeof(amqp_frame_t));
+				if (frame == NULL)
+					return ERROR_NO_MEMORY;
+			}
+
+			res = amqp_handle_input(state, buffer, frame);
+			if (res < 0)
+				return -res;
+
+			state->sock_inbound_offset += res;
+
+			if (frame->frame_type != 0){
+				/* Complete frame was read; store it in the queue. */
+				amqp_link_t *link = amqp_pool_alloc(&state->decoding_pool, sizeof(amqp_link_t));
+
+				if (link == NULL)
+					return ERROR_NO_MEMORY;
+
+				link->next = NULL;
+
+				link->data = frame;
+				frame = NULL;
+				
+				if (state->last_queued_frame == NULL)
+					state->first_queued_frame = link;
+				else
+					state->last_queued_frame->next = link;
+				state->last_queued_frame = link;
+			} else
+				/* Incomplete or ignored frame. Keep processing input. */
+				assert(res != 0);
+		}
+
+		res = recv(state->sockfd, state->sock_inbound_buffer.bytes,
+		           state->sock_inbound_buffer.len, 0);
+		if (res <= 0) {
+			switch (res) {
+			case 0:
+				return ERROR_CONNECTION_CLOSED;
+			case EAGAIN:
+				return 0;
+			default:
+				return amqp_socket_error();
+			}
+		}
+		state->sock_inbound_limit = res;
+		state->sock_inbound_offset = 0;
+	}
+}
+
+int amqp_pop_frame(amqp_connection_state_t state, amqp_frame_t *decoded_frame)
+{
+	if (state->first_queued_frame != NULL) {
+		*decoded_frame = *(amqp_frame_t *) state->first_queued_frame->data;
+		
+		state->first_queued_frame = state->first_queued_frame->next;
+		if (state->first_queued_frame == NULL)
+			state->last_queued_frame = NULL;
+		
+		return 1;
+	} else
+		return 0;
+}
+
 int amqp_simple_wait_method(amqp_connection_state_t state,
 			    amqp_channel_t expected_channel,
 			    amqp_method_number_t expected_method,
