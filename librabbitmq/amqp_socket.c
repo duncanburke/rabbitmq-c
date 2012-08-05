@@ -218,12 +218,12 @@ int amqp_recv_frames(amqp_connection_state_t state)
 			if (frame == NULL){
 				frame = amqp_pool_alloc(&state->decoding_pool, sizeof(amqp_frame_t));
 				if (frame == NULL)
-					return ERROR_NO_MEMORY;
+					return -ERROR_NO_MEMORY;
 			}
 
 			res = amqp_handle_input(state, buffer, frame);
 			if (res < 0)
-				return -res;
+				return res;
 
 			state->sock_inbound_offset += res;
 
@@ -232,7 +232,7 @@ int amqp_recv_frames(amqp_connection_state_t state)
 				amqp_link_t *link = amqp_pool_alloc(&state->decoding_pool, sizeof(amqp_link_t));
 
 				if (link == NULL)
-					return ERROR_NO_MEMORY;
+					return -ERROR_NO_MEMORY;
 
 				link->next = NULL;
 
@@ -254,11 +254,11 @@ int amqp_recv_frames(amqp_connection_state_t state)
 		if (res <= 0) {
 			switch (res) {
 			case 0:
-				return ERROR_CONNECTION_CLOSED;
+				return -ERROR_CONNECTION_CLOSED;
 			case EAGAIN:
 				return 0;
 			default:
-				return amqp_socket_error();
+				return -amqp_socket_error();
 			}
 		}
 		state->sock_inbound_limit = res;
