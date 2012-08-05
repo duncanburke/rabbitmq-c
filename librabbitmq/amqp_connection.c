@@ -335,6 +335,22 @@ void amqp_maybe_release_buffers(amqp_connection_state_t state) {
   }
 }
 
+amqp_boolean_t amqp_release_outbound_buffers_ok(amqp_connection_state_t state) {
+  return (state->first_outbound_frame == NULL);
+}
+
+void amqp_release_outbound_buffers(amqp_connection_state_t state) {
+	if (state->first_outbound_frame)
+		amqp_abort("Programming error: attempt to amqp_release_send_buffers while waiting events enqueued");
+	recycle_amqp_pool(&state->outbound_pool);
+}
+
+void amqp_maybe_release_outbound_buffers(amqp_connection_state_t state) {
+	if (amqp_release_outbound_buffers_ok(state)) {
+		amqp_release_outbound_buffers(state);
+	}
+}
+
 int amqp_send_frame(amqp_connection_state_t state,
 		    const amqp_frame_t *frame)
 {

@@ -104,6 +104,7 @@ typedef struct amqp_link_t_ {
 struct amqp_connection_state_t_ {
   amqp_pool_t frame_pool;
   amqp_pool_t decoding_pool;
+  amqp_pool_t outbound_pool;
 
   amqp_connection_state_enum state;
 
@@ -116,6 +117,10 @@ struct amqp_connection_state_t_ {
   size_t target_size;
 
   amqp_bytes_t outbound_buffer;
+  size_t outbound_offset;
+
+  amqp_link_t *first_outbound_frame;
+  amqp_link_t *last_outbound_frame;
 
   int sockfd;
   amqp_bytes_t sock_inbound_buffer;

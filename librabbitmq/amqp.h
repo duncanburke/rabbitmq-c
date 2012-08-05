@@ -271,6 +271,10 @@ RABBITMQ_EXPORT void amqp_release_buffers(amqp_connection_state_t state);
 
 RABBITMQ_EXPORT void amqp_maybe_release_buffers(amqp_connection_state_t state);
 
+RABBITMQ_EXPORT amqp_boolean_t amqp_release_outbound_buffers_ok(amqp_connection_state_t state);
+RABBITMQ_EXPORT void amqp_release_outbound_buffers(amqp_connection_state_t state);
+RABBITMQ_EXPORT void amqp_maybe_release_outbound_buffers(amqp_connection_state_t state);
+
 RABBITMQ_EXPORT int amqp_send_frame(amqp_connection_state_t state,
 				    amqp_frame_t const *frame);
 
