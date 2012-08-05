@@ -90,6 +90,13 @@ typedef enum amqp_connection_state_enum_ {
   CONNECTION_STATE_BODY
 } amqp_connection_state_enum;
 
+typedef enum amqp_outbound_state_enum_ {
+  OUTBOUND_STATE_IDLE = 0,
+  OUTBOUND_STATE_HEADER,
+  OUTBOUND_STATE_BODY,
+  OUTBOUND_STATE_FOOTER
+} amqp_outbound_state_enum;
+
 /* 7 bytes up front, then payload, then 1 byte footer */
 #define HEADER_SIZE 7
 #define FOOTER_SIZE 1
@@ -116,8 +123,11 @@ struct amqp_connection_state_t_ {
   size_t inbound_offset;
   size_t target_size;
 
+  amqp_outbound_state_enum outbound_state;
   amqp_bytes_t outbound_buffer;
   size_t outbound_offset;
+  size_t outbound_target_offset;
+  void *outbound_ptr;
 
   amqp_link_t *first_outbound_frame;
   amqp_link_t *last_outbound_frame;

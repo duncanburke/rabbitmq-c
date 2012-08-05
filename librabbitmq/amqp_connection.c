@@ -351,6 +351,142 @@ void amqp_maybe_release_outbound_buffers(amqp_connection_state_t state) {
 	}
 }
 
+/* Add the frame to the oubound queue. The frame may be allocated from state->outbound_pool.
+ * NOTE: All relevant pointers in frame MUST remain valid to dereference until amqp_send_outbound_frames next returns 0.
+ * For this reason, it cannot be made backwards compatible with amqp_send_frame (at least without judicious use of memcpy)
+ */
+int amqp_enqueue_outbound_frame(amqp_connection_state_t state, amqp_frame_t *frame) {
+	amqp_link_t *link = amqp_pool_alloc(&state->outbound_pool, sizeof(amqp_link_t));
+	if (link == NULL)
+		return ERROR_NO_MEMORY;
+	link->next = NULL;
+	link->data = frame;
+	
+	if (state->last_outbound_frame == NULL)
+		state->first_outbound_frame = link;
+	else
+		state->last_queued_frame->next = link;
+	state->last_queued_frame = link;
+}
+
+/* Sends frames in outbound queue as possible without blocking.
+ *  Returns 0 if there are no further frames to process, 1 if otherwise successful but writing would block.
+ */
+int amqp_send_outbound_frames(amqp_connection_state_t state) {
+	amqp_frame_t *frame;
+	void* out_frame = state->outbound_buffer.bytes;
+	int res;
+	/* frames are removed from the queue once they have been sent in their entirety */
+	while (state->first_outbound_frame) {
+		/* first, send any pending data */
+		while (state->outbound_state != OUTBOUND_STATE_IDLE && state->outbound_offset < state->outbound_target_offset){
+			res = send(state->sockfd, state->outbound_ptr + state->outbound_offset, state->outbound_target_offset - state->outbound_offset,0);
+			if (res < 0) {
+				switch (res) {
+				case EAGAIN:
+					return 1;
+				default:
+					return -amqp_socket_error();
+				}
+			}
+			state->outbound_offset += res;
+		}
+		frame = state->first_outbound_frame->data;
+		switch (state->outbound_state){
+		case OUTBOUND_STATE_IDLE:
+			amqp_e8(out_frame, 0, frame->frame_type);
+			amqp_e16(out_frame, 1, frame->channel);
+			state->outbound_offset = 0;
+			state->outbound_ptr = state->outbound_buffer.bytes;
+
+			if (frame->frame_type == AMQP_FRAME_BODY){
+				state->outbound_target_offset = HEADER_SIZE;
+				amqp_e32(out_frame, 3, frame->payload.body_fragment.len);
+			} else {
+				size_t out_frame_len;
+				amqp_bytes_t encoded;
+				switch (frame->frame_type){
+				case AMQP_FRAME_METHOD:
+					amqp_e32(out_frame, HEADER_SIZE, frame->payload.method.id);
+					
+					encoded.bytes = amqp_offset(out_frame, HEADER_SIZE + 4);
+					encoded.len = state->outbound_buffer.len - HEADER_SIZE - 4 - FOOTER_SIZE;
+					
+					res = amqp_encode_method(frame->payload.method.id,
+					                         frame->payload.method.decoded, encoded);
+					if (res < 0)
+						return res;
+
+					out_frame_len = res + 4;
+					break;
+				case AMQP_FRAME_HEADER:
+					amqp_e16(out_frame, HEADER_SIZE, frame->payload.properties.class_id);
+					amqp_e16(out_frame, HEADER_SIZE+2, 0); /* "weight" */
+					amqp_e64(out_frame, HEADER_SIZE+4, frame->payload.properties.body_size);
+
+					encoded.bytes = amqp_offset(out_frame, HEADER_SIZE + 12);
+					encoded.len = state->outbound_buffer.len - HEADER_SIZE - 12 - FOOTER_SIZE;
+
+					res = amqp_encode_properties(frame->payload.properties.class_id,
+					                             frame->payload.properties.decoded, encoded);
+					if (res < 0)
+						return res;
+
+					out_frame_len = res + 12;
+					break;
+				case AMQP_FRAME_HEARTBEAT:
+					out_frame_len = 0;
+					break;
+				default:
+					/* TODO: better fault tolerance */
+					abort();
+				}
+				amqp_e32(out_frame, 3, out_frame_len);
+				amqp_e8(out_frame, out_frame_len + HEADER_SIZE, AMQP_FRAME_END);
+				state->outbound_target_offset = out_frame_len + HEADER_SIZE + FOOTER_SIZE;
+			}
+			state->outbound_state = OUTBOUND_STATE_HEADER;
+			break;
+		case OUTBOUND_STATE_HEADER:
+			if (frame->frame_type == AMQP_FRAME_BODY){
+				amqp_bytes_t *body = &frame->payload.body_fragment;
+				state->outbound_ptr = body->bytes;
+				state->outbound_offset = 0;
+				state->outbound_target_offset = body->len;
+				state->outbound_state = OUTBOUND_STATE_BODY;
+			} else {
+				state->outbound_state = OUTBOUND_STATE_IDLE;
+				state->first_outbound_frame = state->first_outbound_frame->next;
+				if (state->first_outbound_frame == NULL)
+					state->last_outbound_frame == NULL;
+			}
+			break;
+		case OUTBOUND_STATE_BODY:
+			if (frame->frame_type == AMQP_FRAME_BODY){
+				state->outbound_ptr = state->outbound_buffer.bytes;
+				*(char*)state->outbound_buffer.bytes = AMQP_FRAME_END;
+				state->outbound_offset = 0;
+				state->outbound_target_offset = FOOTER_SIZE;
+				state->outbound_state = OUTBOUND_STATE_FOOTER;
+			} else
+				abort();
+			break;
+		case OUTBOUND_STATE_FOOTER:
+			if (frame->frame_type == AMQP_FRAME_BODY){
+				state->outbound_state = OUTBOUND_STATE_IDLE;
+				state->first_outbound_frame = state->first_outbound_frame->next;
+				if (state->first_outbound_frame == NULL)
+					state->last_outbound_frame == NULL;
+			} else
+				abort();
+			break;
+		default:
+			abort();
+		}
+	}
+	return 0;
+}
+
 int amqp_send_frame(amqp_connection_state_t state,
 		    const amqp_frame_t *frame)
 {
