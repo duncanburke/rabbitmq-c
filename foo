@@ -1,0 +1,1 @@
+autoreconf -i && ./configure && make clean && make -j 4 && rm -f /usr/local/lib/librabbitmq.* /usr/local/include/amqp* /usr/lib/librabbitmq.* /usr/include/amqp* && make install && ln /usr/local/lib/librabbitmq.* /usr/lib/ && ln /usr/local/include/amqp* /usr/include/

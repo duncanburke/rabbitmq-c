@@ -356,17 +356,21 @@ void amqp_maybe_release_outbound_buffers(amqp_connection_state_t state) {
  * For this reason, it cannot be made backwards compatible with amqp_send_frame (at least without judicious use of memcpy)
  */
 int amqp_enqueue_outbound_frame(amqp_connection_state_t state, amqp_frame_t *frame) {
+	/*fprintf(stderr,"enqueue_outbound_frame: first_outbound_frame 0x%x last_outbound_frame 0x%x frame 0x%x\n", (int)state->first_outbound_frame, (int)state->last_outbound_frame, (int)frame);*/
 	amqp_link_t *link = amqp_pool_alloc(&state->outbound_pool, sizeof(amqp_link_t));
 	if (link == NULL)
 		return ERROR_NO_MEMORY;
 	link->next = NULL;
 	link->data = frame;
-	
+	/* fprintf(stderr,"enqueue_outbound_frame: link 0x%x( *0x%x = 0x%x )\n", (long)link, (long)&(link->data), (long)link->data); */
+	       
 	if (state->last_outbound_frame == NULL)
 		state->first_outbound_frame = link;
 	else
-		state->last_queued_frame->next = link;
-	state->last_queued_frame = link;
+		state->last_outbound_frame->next = link;
+	state->last_outbound_frame = link;
+	/* fprintf(stderr,"enqueue_outbound_frame: first_outbound_frame 0x%x last_outbound_frame 0x%x\n", (int)state->first_outbound_frame, (int)state->last_outbound_frame); */
+	return 0;
 }
 
 /* Sends frames in outbound queue as possible without blocking.
@@ -377,23 +381,27 @@ int amqp_send_outbound_frames(amqp_connection_state_t state) {
 	void* out_frame = state->outbound_buffer.bytes;
 	int res;
 	/* frames are removed from the queue once they have been sent in their entirety */
+	/* fprintf(stderr,"send_outbound_frames: first_outbound_frame 0x%x(0x%x) last_outbound_frame 0x%x(0x%x)\n", (long)state->first_outbound_frame, (long)state->first_outbound_frame->data, (long)state->last_outbound_frame, (long)state->last_outbound_frame->data); */
 	while (state->first_outbound_frame) {
+		/* fprintf(stderr, "processing 0x%x\n", (long)state->first_outbound_frame); */
 		/* first, send any pending data */
+		/* fprintf(stderr,"outbound_offset %d outbound_target_offset %d\n", state->outbound_offset, state->outbound_target_offset); */
 		while (state->outbound_state != OUTBOUND_STATE_IDLE && state->outbound_offset < state->outbound_target_offset){
-			res = send(state->sockfd, state->outbound_ptr + state->outbound_offset, state->outbound_target_offset - state->outbound_offset,0);
+			res = send(state->sockfd, (char*)state->outbound_ptr + state->outbound_offset, state->outbound_target_offset - state->outbound_offset,0);
+			/* fprintf(stderr,"send %d\n", res); */
 			if (res < 0) {
-				switch (res) {
-				case EAGAIN:
+				if (errno == EAGAIN)
 					return 1;
-				default:
+				else
 					return -amqp_socket_error();
-				}
 			}
 			state->outbound_offset += res;
 		}
 		frame = state->first_outbound_frame->data;
+    /*fprintf(stderr,"outbound_state: %d\n", (int)state->outbound_state);*/
 		switch (state->outbound_state){
 		case OUTBOUND_STATE_IDLE:
+      /*fprintf(stderr,"OUTBOUND_STATE_IDLE\n");*/
 			amqp_e8(out_frame, 0, frame->frame_type);
 			amqp_e16(out_frame, 1, frame->channel);
 			state->outbound_offset = 0;
@@ -448,6 +456,7 @@ int amqp_send_outbound_frames(amqp_connection_state_t state) {
 			state->outbound_state = OUTBOUND_STATE_HEADER;
 			break;
 		case OUTBOUND_STATE_HEADER:
+      /*fprintf(stderr,"OUTBOUND_STATE_HEADER\n");*/
 			if (frame->frame_type == AMQP_FRAME_BODY){
 				amqp_bytes_t *body = &frame->payload.body_fragment;
 				state->outbound_ptr = body->bytes;
@@ -458,13 +467,14 @@ int amqp_send_outbound_frames(amqp_connection_state_t state) {
 				state->outbound_state = OUTBOUND_STATE_IDLE;
 				state->first_outbound_frame = state->first_outbound_frame->next;
 				if (state->first_outbound_frame == NULL)
-					state->last_outbound_frame == NULL;
+					state->last_outbound_frame = NULL;
 			}
 			break;
 		case OUTBOUND_STATE_BODY:
+      /*fprintf(stderr,"OUTBOUND_STATE_BODY\n");*/
 			if (frame->frame_type == AMQP_FRAME_BODY){
 				state->outbound_ptr = state->outbound_buffer.bytes;
-				*(char*)state->outbound_buffer.bytes = AMQP_FRAME_END;
+				*(char*)state->outbound_buffer.bytes = (char)AMQP_FRAME_END;
 				state->outbound_offset = 0;
 				state->outbound_target_offset = FOOTER_SIZE;
 				state->outbound_state = OUTBOUND_STATE_FOOTER;
@@ -472,18 +482,21 @@ int amqp_send_outbound_frames(amqp_connection_state_t state) {
 				abort();
 			break;
 		case OUTBOUND_STATE_FOOTER:
+      /*fprintf(stderr,"OUTBOUND_STATE_FOOTER\n");*/
 			if (frame->frame_type == AMQP_FRAME_BODY){
 				state->outbound_state = OUTBOUND_STATE_IDLE;
 				state->first_outbound_frame = state->first_outbound_frame->next;
 				if (state->first_outbound_frame == NULL)
-					state->last_outbound_frame == NULL;
+					state->last_outbound_frame = NULL;
 			} else
 				abort();
 			break;
 		default:
+      /*fprintf(stderr,"Invalid outbound state: aborting\n");*/
 			abort();
 		}
 	}
+	/*fprintf(stderr,"All outbound frames have been sent\n");*/
 	return 0;
 }
 
@@ -561,6 +574,7 @@ int amqp_send_frame(amqp_connection_state_t state,
     amqp_e8(out_frame, out_frame_len + HEADER_SIZE, AMQP_FRAME_END);
     res = send(state->sockfd, out_frame,
                out_frame_len + HEADER_SIZE + FOOTER_SIZE, 0);
+    /*fprintf(stderr,"amqp_send_frame: res %d\n", res);*/
   }
 
   if (res < 0)

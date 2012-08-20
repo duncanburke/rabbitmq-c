@@ -196,6 +196,7 @@ int amqp_simple_wait_frame(amqp_connection_state_t state,
     if (state->first_queued_frame == NULL) {
       state->last_queued_frame = NULL;
     }
+    /*fprintf(stderr, "amqp_simple_wait_frame: first_queued_frame 0x%x last_queued_frame 0x%x\n", (int)state->first_queued_frame, (int)state->last_queued_frame);*/
     *decoded_frame = *f;
     return 0;
   } else {
@@ -208,26 +209,30 @@ int amqp_recv_frames(amqp_connection_state_t state)
 	while (1) {
 		int res;
 		amqp_frame_t *frame = NULL;
-		
+		/*fprintf(stderr, "amqp_recv_frames: first_queued_frame 0x%x last_queued_frame 0x%x\n", (int)state->first_queued_frame, (int)state->last_queued_frame);*/
 		while (amqp_data_in_buffer(state)) {
 			amqp_bytes_t buffer;
 			
 			buffer.len = state->sock_inbound_limit - state->sock_inbound_offset;
 			buffer.bytes = ((char *) state->sock_inbound_buffer.bytes) + state->sock_inbound_offset;
 
+			/*fprintf(stderr, "amqp_recv_frames: inbound_buffer 0x%x offset %d\n", (int)state->sock_inbound_buffer.bytes, (int)state->sock_inbound_offset);*/
 			if (frame == NULL){
 				frame = amqp_pool_alloc(&state->decoding_pool, sizeof(amqp_frame_t));
+				/*fprintf(stderr, "amqp_recv_frames: alloced new frame 0x%x\n", (int)frame);*/
 				if (frame == NULL)
 					return -ERROR_NO_MEMORY;
 			}
 
 			res = amqp_handle_input(state, buffer, frame);
+			/*fprintf(stderr, "amqp_recv_frames: handle_input %d\n", res);*/
 			if (res < 0)
 				return res;
 
 			state->sock_inbound_offset += res;
 
 			if (frame->frame_type != 0){
+				/*fprintf(stderr, "amqp_recv_frames: processed frame type %d\n", frame->frame_type);*/
 				/* Complete frame was read; store it in the queue. */
 				amqp_link_t *link = amqp_pool_alloc(&state->decoding_pool, sizeof(amqp_link_t));
 
@@ -239,11 +244,15 @@ int amqp_recv_frames(amqp_connection_state_t state)
 				link->data = frame;
 				frame = NULL;
 				
-				if (state->last_queued_frame == NULL)
+				if (state->last_queued_frame == NULL) {
+					assert(state->first_queued_frame == NULL);
 					state->first_queued_frame = link;
-				else
+				} else {
+					assert(state->first_queued_frame != NULL);
 					state->last_queued_frame->next = link;
+				}
 				state->last_queued_frame = link;
+				/*fprintf(stderr, "amqp_recv_frames: first_queued_frame 0x%x last_queued_frame 0x%x\n", (int)state->first_queued_frame, (int)state->last_queued_frame);*/
 			} else
 				/* Incomplete or ignored frame. Keep processing input. */
 				assert(res != 0);
@@ -251,23 +260,26 @@ int amqp_recv_frames(amqp_connection_state_t state)
 
 		res = recv(state->sockfd, state->sock_inbound_buffer.bytes,
 		           state->sock_inbound_buffer.len, 0);
+		/*fprintf(stderr, "amqp_recv_frames: recv %d\n", res);*/
 		if (res == 0)
-      return -ERROR_CONNECTON_CLOSED;
-    else if(res < 0) {
-      if (errno == EAGAIN)
-        return 0;
-      else
-        return -amqp_socket_error();
+			return -ERROR_CONNECTION_CLOSED;
+		else if(res == -1) {
+			int err = amqp_socket_error();
+			if ((err & ~ERROR_CATEGORY_OS) == EAGAIN){
+				return 0;
+			} else
+				return -err;
 		}
 		state->sock_inbound_limit = res;
 		state->sock_inbound_offset = 0;
 	}
 }
 
-int amqp_pop_frame(amqp_connection_state_t state, amqp_frame_t *decoded_frame)
+int amqp_pop_frame(amqp_connection_state_t state, amqp_frame_t **decoded_frame)
 {
+	/*fprintf(stderr, "amqp_pop_frame: first_queued_frame 0x%x\n", state->first_queued_frame);*/
 	if (state->first_queued_frame != NULL) {
-		*decoded_frame = *(amqp_frame_t *) state->first_queued_frame->data;
+		*decoded_frame = (amqp_frame_t *)state->first_queued_frame->data;
 		
 		state->first_queued_frame = state->first_queued_frame->next;
 		if (state->first_queued_frame == NULL)
@@ -395,7 +407,7 @@ amqp_rpc_reply_t amqp_simple_rpc(amqp_connection_state_t state,
 	state->last_queued_frame->next = link;
       }
       state->last_queued_frame = link;
-
+      /*fprintf(stderr, "amqp_simple_rpc: first_queued_frame 0x%x last_queued_frame 0x%x\n", (int)state->first_queued_frame, (int)state->last_queued_frame);*/
       goto retry;
     }
 

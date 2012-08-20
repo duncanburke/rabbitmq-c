@@ -298,7 +298,7 @@ RABBITMQ_EXPORT int amqp_simple_wait_frame(amqp_connection_state_t state,
 RABBITMQ_EXPORT int amqp_recv_frames(amqp_connection_state_t state);
 
 RABBITMQ_EXPORT int amqp_pop_frame(amqp_connection_state_t state,
-					   amqp_frame_t *decoded_frame);
+					   amqp_frame_t **decoded_frame);
 
 RABBITMQ_EXPORT int amqp_simple_wait_method(amqp_connection_state_t state,
                                           amqp_channel_t expected_channel,
