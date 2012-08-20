@@ -251,15 +251,13 @@ int amqp_recv_frames(amqp_connection_state_t state)
 
 		res = recv(state->sockfd, state->sock_inbound_buffer.bytes,
 		           state->sock_inbound_buffer.len, 0);
-		if (res <= 0) {
-			switch (res) {
-			case 0:
-				return -ERROR_CONNECTION_CLOSED;
-			case EAGAIN:
-				return 0;
-			default:
-				return -amqp_socket_error();
-			}
+		if (res == 0)
+      return -ERROR_CONNECTON_CLOSED;
+    else if(res < 0) {
+      if (errno == EAGAIN)
+        return 0;
+      else
+        return -amqp_socket_error();
 		}
 		state->sock_inbound_limit = res;
 		state->sock_inbound_offset = 0;
