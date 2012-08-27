@@ -355,7 +355,7 @@ void amqp_maybe_release_outbound_buffers(amqp_connection_state_t state) {
  * NOTE: All relevant pointers in frame MUST remain valid to dereference until amqp_send_outbound_frames next returns 0.
  * For this reason, it cannot be made backwards compatible with amqp_send_frame (at least without judicious use of memcpy)
  */
-int amqp_enqueue_outbound_frame(amqp_connection_state_t state, amqp_frame_t *frame) {
+int amqp_enqueue_outbound_frame(amqp_connection_state_t state, amqp_outbound_frame_t *frame) {
 	/*fprintf(stderr,"enqueue_outbound_frame: first_outbound_frame 0x%x last_outbound_frame 0x%x frame 0x%x\n", (int)state->first_outbound_frame, (int)state->last_outbound_frame, (int)frame);*/
 	amqp_link_t *link = amqp_pool_alloc(&state->outbound_pool, sizeof(amqp_link_t));
 	if (link == NULL)
@@ -377,6 +377,7 @@ int amqp_enqueue_outbound_frame(amqp_connection_state_t state, amqp_frame_t *fra
  *  Returns 0 if there are no further frames to process, 1 if otherwise successful but writing would block.
  */
 int amqp_send_outbound_frames(amqp_connection_state_t state) {
+	amqp_outbound_frame_t *frame_info;
 	amqp_frame_t *frame;
 	void* out_frame = state->outbound_buffer.bytes;
 	int res;
@@ -397,7 +398,8 @@ int amqp_send_outbound_frames(amqp_connection_state_t state) {
 			}
 			state->outbound_offset += res;
 		}
-		frame = state->first_outbound_frame->data;
+		frame_info = (amqp_outbound_frame_t*)state->first_outbound_frame->data;
+		frame = frame_info->frame;
     /*fprintf(stderr,"outbound_state: %d\n", (int)state->outbound_state);*/
 		switch (state->outbound_state){
 		case OUTBOUND_STATE_IDLE:
@@ -464,6 +466,7 @@ int amqp_send_outbound_frames(amqp_connection_state_t state) {
 				state->outbound_target_offset = body->len;
 				state->outbound_state = OUTBOUND_STATE_BODY;
 			} else {
+				frame_info->destructor(frame_info->destruct_ptr);
 				state->outbound_state = OUTBOUND_STATE_IDLE;
 				state->first_outbound_frame = state->first_outbound_frame->next;
 				if (state->first_outbound_frame == NULL)
@@ -484,6 +487,7 @@ int amqp_send_outbound_frames(amqp_connection_state_t state) {
 		case OUTBOUND_STATE_FOOTER:
       /*fprintf(stderr,"OUTBOUND_STATE_FOOTER\n");*/
 			if (frame->frame_type == AMQP_FRAME_BODY){
+				frame_info->destructor(frame_info->destruct_ptr);
 				state->outbound_state = OUTBOUND_STATE_IDLE;
 				state->first_outbound_frame = state->first_outbound_frame->next;
 				if (state->first_outbound_frame == NULL)
