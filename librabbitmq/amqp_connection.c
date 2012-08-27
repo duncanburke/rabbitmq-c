@@ -399,8 +399,10 @@ int amqp_send_outbound_frames(amqp_connection_state_t state) {
 			state->outbound_offset += res;
 		}
 		frame_info = (amqp_outbound_frame_t*)state->first_outbound_frame->data;
+		assert(frame_info);
 		frame = frame_info->frame;
-    /*fprintf(stderr,"outbound_state: %d\n", (int)state->outbound_state);*/
+		assert(frame);
+		/*fprintf(stderr,"outbound_state: %d\n", (int)state->outbound_state);*/
 		switch (state->outbound_state){
 		case OUTBOUND_STATE_IDLE:
       /*fprintf(stderr,"OUTBOUND_STATE_IDLE\n");*/
