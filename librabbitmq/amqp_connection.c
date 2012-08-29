@@ -63,6 +63,7 @@ amqp_connection_state_t amqp_new_connection(void) {
 
   init_amqp_pool(&state->frame_pool, INITIAL_FRAME_POOL_PAGE_SIZE);
   init_amqp_pool(&state->decoding_pool, INITIAL_DECODING_POOL_PAGE_SIZE);
+  init_amqp_pool(&state->outbound_pool, INITIAL_DECODING_POOL_PAGE_SIZE);
 
   if (amqp_tune_connection(state, 0, INITIAL_FRAME_POOL_PAGE_SIZE, 0) != 0)
     goto out_nomem;
