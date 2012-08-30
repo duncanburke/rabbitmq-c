@@ -204,7 +204,7 @@ typedef struct amqp_frame_t_ {
 } amqp_frame_t;
 
 typedef struct amqp_outbound_frame_t_ {
-  void (*destructor)(void* destruct_ptr);
+	void (*destructor)(void* destruct_ptr, int success);
 	void* destruct_ptr;
   amqp_frame_t *frame;
 } amqp_outbound_frame_t;
@@ -282,8 +282,9 @@ RABBITMQ_EXPORT void amqp_release_outbound_buffers(amqp_connection_state_t state
 RABBITMQ_EXPORT void amqp_maybe_release_outbound_buffers(amqp_connection_state_t state);
 
 RABBITMQ_EXPORT int amqp_enqueue_outbound_frame(amqp_connection_state_t state, amqp_outbound_frame_t *frame);
+RABBITMQ_EXPORT int amqp_empty_outbound_frames(amqp_connection_state_t state);
 RABBITMQ_EXPORT int amqp_send_outbound_frames(amqp_connection_state_t state);
-	
+
 RABBITMQ_EXPORT int amqp_send_frame(amqp_connection_state_t state,
 				    amqp_frame_t const *frame);
 
